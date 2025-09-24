@@ -1,0 +1,11 @@
+{
+  "name": "@repo/sdk",
+  "version": "0.1.0",
+  "description": "Typed API client for SPEC-1 services",
+  "type": "module",
+  "main": "src/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "openapi-fetch": "^0.14.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@spec/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared configuration for SPEC-1 monorepo",
+  "exports": {
+    "./eslint": "./eslint/base.cjs",
+    "./tsconfig": "./tsconfig/base.json",
+    "./queues": "./queues.js"
+  },
+  "typesVersions": {
+    "*": {
+      "queues": ["./queues.d.ts"]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "spec-1-whatsapp-bot-pos-superapp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SPEC-1 WhatsApp Bot + POS SuperApp (MVP)",
+  "packageManager": "pnpm@8.15.5",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "test:e2e": "playwright test",
+    "prisma:migrate": "pnpm --filter api run prisma:migrate",
+    "prisma:seed": "pnpm --filter api run prisma:seed",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.43.1",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.2",
+    "typescript": "^5.4.5"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --max-warnings=0"
+    ]
+  }
+}
