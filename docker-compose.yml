@@ -1,0 +1,213 @@
+version: '3.9'
+
+services:
+  proxy:
+    image: nginx:1.25
+    container_name: spec-proxy
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      baileys:
+        condition: service_started
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot:/etc/letsencrypt
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - TZ=Asia/Kuala_Lumpur
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: spec-web
+    env_file: .env
+    environment:
+      - PORT=3000
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: spec-api
+    env_file: .env
+    environment:
+      - PORT=3001
+      - GIT_SHA=${GIT_SHA:-local}
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - JWT_REFRESH_SECRET_FILE=/run/secrets/jwt_refresh_secret
+      - SESSION_COOKIE_SECRET_FILE=/run/secrets/session_cookie_secret
+      - RECAPTCHA_SECRET_FILE=/run/secrets/recaptcha_secret
+      - MINIO_SECRET_KEY_FILE=/run/secrets/minio_secret_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    secrets:
+      - jwt_secret
+      - jwt_refresh_secret
+      - session_cookie_secret
+      - recaptcha_secret
+      - minio_secret_key
+
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    container_name: spec-worker
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      - MINIO_SECRET_KEY_FILE=/run/secrets/minio_secret_key
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'process.exit(0)'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  baileys:
+    build:
+      context: ./apps/baileys
+      dockerfile: Dockerfile
+    container_name: spec-baileys
+    env_file: .env
+    environment:
+      - PORT=${BAILEYS_HTTP_PORT:-4001}
+      - WS_PORT=${BAILEYS_WS_PORT:-4002}
+    volumes:
+      - ./apps/baileys/sessions:/app/sessions
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose:
+      - "4001"
+      - "4002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4001/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    secrets:
+      - minio_secret_key
+
+  postgres:
+    image: postgres:16
+    container_name: spec-postgres
+    env_file: .env
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+      - TZ=Asia/Kuala_Lumpur
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: spec-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-02-24T17-11-14Z
+    container_name: spec-minio
+    env_file: .env
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  certbot-once:
+    image: certbot/certbot:latest
+    container_name: spec-certbot-once
+    profiles: ["certbot"]
+    volumes:
+      - certbot:/etc/letsencrypt
+    command: certonly --standalone --non-interactive --agree-tos -m admin@${DOMAIN} -d ${DOMAIN}
+
+  certbot-renew:
+    image: certbot/certbot:latest
+    container_name: spec-certbot-renew
+    profiles: ["certbot"]
+    volumes:
+      - certbot:/etc/letsencrypt
+    entrypoint: ["/bin/sh", "-c"]
+    command: "while :; do certbot renew --quiet; sleep 12h; done"
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  certbot:
+
+secrets:
+  jwt_secret:
+    file: ./deploy/secrets/jwt_secret
+  jwt_refresh_secret:
+    file: ./deploy/secrets/jwt_refresh_secret
+  session_cookie_secret:
+    file: ./deploy/secrets/session_cookie_secret
+  recaptcha_secret:
+    file: ./deploy/secrets/recaptcha_secret
+  minio_secret_key:
+    file: ./deploy/secrets/minio_secret_key

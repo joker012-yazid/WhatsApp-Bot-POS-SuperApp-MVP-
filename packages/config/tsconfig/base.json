@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "SPEC Monorepo",
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "types": ["node"],
+    "paths": {
+      "@repo/prisma": ["../../prisma"],
+      "@repo/ui": ["../../packages/ui/src"],
+      "@repo/sdk": ["../../packages/sdk/src"]
+    }
+  }
+}

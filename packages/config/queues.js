@@ -1,0 +1,13 @@
+export const QueueNames = {
+  CHAT_INBOUND: 'CHAT_INBOUND',
+  SEND_TEMPLATE: 'SEND_TEMPLATE',
+  REMINDER_R1: 'REMINDER_R1',
+  REMINDER_R2: 'REMINDER_R2',
+  REMINDER_R3: 'REMINDER_R3',
+  MEDIA_PROCESS: 'MEDIA_PROCESS',
+  PDF_INVOICE: 'PDF_INVOICE',
+  BACKUP_DAILY: 'BACKUP_DAILY',
+  PRINT_JOB: 'PRINT_JOB'
+} as const;
+
+export const QueueList = Object.values(QueueNames);
