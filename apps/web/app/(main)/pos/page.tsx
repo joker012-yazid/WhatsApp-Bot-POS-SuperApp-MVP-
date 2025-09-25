@@ -4,6 +4,12 @@ import { FormEvent, useMemo, useState } from 'react';
 
 type PaymentMethod = 'CASH' | 'CARD' | 'EWALLET';
 
+type OrderItem = {
+  description: string;
+  qty: number;
+  unitPrice: number;
+};
+
 type Order = {
   receipt: string;
   customer: string;
@@ -12,6 +18,7 @@ type Order = {
   tax: number;
   total: number;
   paymentMethod: PaymentMethod;
+  items: OrderItem[];
 };
 
 const initialOrders: Order[] = [
@@ -22,7 +29,12 @@ const initialOrders: Order[] = [
     discount: 250,
     tax: 285,
     total: 5035,
-    paymentMethod: 'EWALLET'
+    paymentMethod: 'EWALLET',
+    items: [
+      { description: 'Tealive Brown Sugar Pearl Milk Tea', qty: 2, unitPrice: 1200 },
+      { description: 'Sanitised Straw Set', qty: 2, unitPrice: 50 },
+      { description: 'Reusable Cup Deposit', qty: 2, unitPrice: 100 }
+    ]
   },
   {
     receipt: 'BRHQ-20240423-0002',
@@ -31,7 +43,11 @@ const initialOrders: Order[] = [
     discount: 0,
     tax: 720,
     total: 12720,
-    paymentMethod: 'CASH'
+    paymentMethod: 'CASH',
+    items: [
+      { description: 'Lunch Set A', qty: 3, unitPrice: 3200 },
+      { description: 'Lunch Set B', qty: 1, unitPrice: 2400 }
+    ]
   }
 ];
 
@@ -47,6 +63,24 @@ export default function PosPage() {
   const [orders, setOrders] = useState(initialOrders);
   const [sequence, setSequence] = useState(initialOrders.length);
   const [printedReceipt, setPrintedReceipt] = useState('');
+  const [invoiceDraft, setInvoiceDraft] = useState<
+    | {
+        customer: string;
+        items: OrderItem[];
+        sourceReceipt: string;
+      }
+    | null
+  >(null);
+  const [invoiceDraftMessage, setInvoiceDraftMessage] = useState('');
+  const [linkTarget, setLinkTarget] = useState<
+    | {
+        receipt: string;
+        customer: string;
+        invoiceNo: string;
+      }
+    | null
+  >(null);
+  const [linkMessage, setLinkMessage] = useState('');
   const [form, setForm] = useState({
     customer: '',
     subtotal: '0',
@@ -91,7 +125,14 @@ export default function PosPage() {
       discount: discountCents,
       tax,
       total,
-      paymentMethod: form.paymentMethod
+      paymentMethod: form.paymentMethod,
+      items: [
+        {
+          description: 'POS Custom Sale Item',
+          qty: 1,
+          unitPrice: discounted
+        }
+      ]
     };
 
     setOrders((current) => [order, ...current]);
@@ -101,6 +142,35 @@ export default function PosPage() {
 
   const handlePrint = (receipt: string) => {
     setPrintedReceipt(receipt);
+  };
+
+  const handleInvoiceDraft = (order: Order) => {
+    setInvoiceDraft({ customer: order.customer, items: order.items, sourceReceipt: order.receipt });
+    setInvoiceDraftMessage('');
+  };
+
+  const handleInvoiceDraftConfirm = () => {
+    if (!invoiceDraft) {
+      return;
+    }
+    setInvoiceDraftMessage(
+      `Invoice draft for ${invoiceDraft.customer} prepared from receipt ${invoiceDraft.sourceReceipt}.`
+    );
+    setInvoiceDraft(null);
+  };
+
+  const handleLinkInvoice = (order: Order) => {
+    setLinkTarget({ receipt: order.receipt, customer: order.customer, invoiceNo: '' });
+    setLinkMessage('');
+  };
+
+  const handleLinkSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!linkTarget || !linkTarget.invoiceNo.trim()) {
+      return;
+    }
+    setLinkMessage(`Receipt ${linkTarget.receipt} linked to invoice ${linkTarget.invoiceNo.trim()}.`);
+    setLinkTarget(null);
   };
 
   return (
@@ -181,8 +251,75 @@ export default function PosPage() {
         {printedReceipt ? (
           <p className="subheading">PDF print queued for {printedReceipt}.</p>
         ) : null}
+        {invoiceDraftMessage ? <p className="subheading">{invoiceDraftMessage}</p> : null}
+        {linkMessage ? <p className="subheading">{linkMessage}</p> : null}
         <p className="subheading">Total sales today: {formatCurrency(totals.sales)}</p>
       </section>
+
+      {invoiceDraft ? (
+        <section className="stat-card">
+          <h3 className="heading">Create Invoice from Sale</h3>
+          <p className="subheading">
+            Customer {invoiceDraft.customer} from receipt {invoiceDraft.sourceReceipt} will be pre-filled.
+          </p>
+          <table className="table" style={{ marginBottom: '1rem' }}>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoiceDraft.items.map((item, index) => (
+                <tr key={`${item.description}-${index}`}>
+                  <td>{item.description}</td>
+                  <td>{item.qty}</td>
+                  <td>{formatCurrency(item.unitPrice)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="button-row">
+            <button type="button" className="button-primary" onClick={handleInvoiceDraftConfirm}>
+              Save Invoice Draft
+            </button>
+            <button type="button" className="button-secondary" onClick={() => setInvoiceDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {linkTarget ? (
+        <section className="stat-card">
+          <h3 className="heading">Link Sale to Existing Invoice</h3>
+          <p className="subheading">Customer {linkTarget.customer} selected from receipt {linkTarget.receipt}.</p>
+          <form className="stats-grid" style={{ gap: '0.75rem' }} onSubmit={handleLinkSubmit}>
+            <label className="label">
+              Invoice Number
+              <input
+                className="input"
+                value={linkTarget.invoiceNo}
+                onChange={(event) =>
+                  setLinkTarget((current) =>
+                    current ? { ...current, invoiceNo: event.target.value.toUpperCase() } : null
+                  )
+                }
+                placeholder="INVBRHQ-20240423-0001"
+              />
+            </label>
+            <div className="button-row">
+              <button type="submit" className="button-primary">
+                Link Invoice
+              </button>
+              <button type="button" className="button-secondary" onClick={() => setLinkTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       <section>
         <table className="table" data-testid="pos-table">
@@ -209,14 +346,26 @@ export default function PosPage() {
                 <td>{formatCurrency(order.tax)}</td>
                 <td>{formatCurrency(order.total)}</td>
                 <td>
-                  <button
-                    type="button"
-                    className="button-primary"
-                    onClick={() => handlePrint(order.receipt)}
-                    data-testid={`print-${order.receipt}`}
-                  >
-                    Print PDF
-                  </button>
+                  <div className="button-column" style={{ gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={() => handlePrint(order.receipt)}
+                      data-testid={`print-${order.receipt}`}
+                    >
+                      Print PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleInvoiceDraft(order)}
+                    >
+                      Create Invoice from Sale
+                    </button>
+                    <button type="button" className="button-secondary" onClick={() => handleLinkInvoice(order)}>
+                      Link to Existing Invoice
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

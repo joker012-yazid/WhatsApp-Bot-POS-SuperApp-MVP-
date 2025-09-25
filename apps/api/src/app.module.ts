@@ -8,6 +8,9 @@ import { CustomersModule } from './customers/customers.module';
 import { ChatModule } from './chat/chat.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { PosModule } from './pos/pos.module';
+import { QuotesModule } from './quotes/quotes.module';
+import { InvoicesModule } from './invoices/invoices.module';
+import { CreditNotesModule } from './credit-notes/credit-notes.module';
 import { FilesModule } from './files/files.module';
 import { HealthModule } from './health/health.module';
 import { CacheModule } from './common/cache/cache.module';
@@ -26,6 +29,9 @@ import { CacheModule } from './common/cache/cache.module';
     CustomersModule,
     ChatModule,
     TicketsModule,
+    QuotesModule,
+    InvoicesModule,
+    CreditNotesModule,
     PosModule,
     FilesModule,
     HealthModule,

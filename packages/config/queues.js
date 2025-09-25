@@ -7,7 +7,9 @@ export const QueueNames = {
   MEDIA_PROCESS: 'MEDIA_PROCESS',
   PDF_INVOICE: 'PDF_INVOICE',
   BACKUP_DAILY: 'BACKUP_DAILY',
-  PRINT_JOB: 'PRINT_JOB'
+  PRINT_JOB: 'PRINT_JOB',
+  EINVOICE_SUBMIT: 'EINVOICE_SUBMIT',
+  EINVOICE_STATUS_POLL: 'EINVOICE_STATUS_POLL'
 } as const;
 
 export const QueueList = Object.values(QueueNames);

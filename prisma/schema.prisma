@@ -25,6 +25,42 @@ enum PaymentMethod {
   CASH
   CARD
   EWALLET
+  BANK
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum CreditNoteStatus {
+  ISSUED
+  VOID
+}
+
+enum EinvoiceSubmissionStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  FAILED
+}
+
+enum EinvoiceProvider {
+  MOCK
+  MYINVOIS
+  PEPPOL
 }
 
 enum WaMessageDirection {
@@ -67,6 +103,9 @@ model Branch {
   products          Product[]
   sales             Sale[]
   waSessions        WaSession[]
+  quotes            Quote[]
+  invoices          Invoice[]
+  creditNotes       CreditNote[]
 
   @@map("branches")
 }
@@ -83,6 +122,8 @@ model Customer {
   sales          Sale[]
   interactions   CrmInteraction[]
   formSubmissions FormSubmission[]
+  quotes         Quote[]
+  invoices       Invoice[]
 
   @@index([phone])
   @@map("customers")
@@ -99,6 +140,9 @@ model Product {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   saleItems  SaleItem[]
+  quoteItems QuoteItem[]
+  invoiceItems InvoiceItem[]
+  creditNoteItems CreditNoteItem[]
 
   @@unique([branchId, sku])
   @@index([branchId, name])
@@ -121,6 +165,7 @@ model Sale {
   updatedAt      DateTime      @updatedAt
   items          SaleItem[]
   auditLogs      AuditLog[]
+  invoices       Invoice[]
 
   @@index([branchId, createdAt(sort: Desc)])
   @@map("sales")
@@ -139,6 +184,172 @@ model SaleItem {
   createdAt     DateTime @default(now())
 
   @@map("sale_items")
+}
+
+model Quote {
+  id               String          @id @default(cuid())
+  quoteNo          String
+  branchId         String
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customerId       String?
+  customer         Customer?       @relation(fields: [customerId], references: [id])
+  itemsTotal       Decimal         @db.Decimal(12, 2)
+  discountTotal    Decimal         @db.Decimal(12, 2) @default("0")
+  taxableSubtotal  Decimal         @db.Decimal(12, 2)
+  sst              Decimal         @db.Decimal(12, 2)
+  grandTotal       Decimal         @db.Decimal(12, 2)
+  currency         String          @default("MYR")
+  status           QuoteStatus     @default(DRAFT)
+  validUntil       DateTime?
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  items            QuoteItem[]
+  invoices         Invoice[]
+
+  @@unique([branchId, quoteNo])
+  @@index([customerId, status])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id           String   @id @default(cuid())
+  quoteId      String
+  quote        Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id])
+  description  String
+  qty          Decimal  @db.Decimal(12, 2)
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  lineDiscount Decimal  @db.Decimal(12, 2) @default("0")
+  lineTotal    Decimal  @db.Decimal(12, 2)
+  taxCode      String?
+
+  @@map("quote_items")
+}
+
+model Invoice {
+  id               String                @id @default(cuid())
+  invoiceNo        String
+  branchId         String
+  branch           Branch                @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customerId       String?
+  customer         Customer?             @relation(fields: [customerId], references: [id])
+  quoteId          String?
+  quote            Quote?                @relation(fields: [quoteId], references: [id])
+  issueDate        DateTime
+  dueDate          DateTime?
+  itemsTotal       Decimal               @db.Decimal(12, 2)
+  discountTotal    Decimal               @db.Decimal(12, 2) @default("0")
+  taxableSubtotal  Decimal               @db.Decimal(12, 2)
+  sst              Decimal               @db.Decimal(12, 2)
+  grandTotal       Decimal               @db.Decimal(12, 2)
+  paidTotal        Decimal               @db.Decimal(12, 2) @default("0")
+  balanceDue       Decimal               @db.Decimal(12, 2)
+  currency         String                @default("MYR")
+  status           InvoiceStatus         @default(DRAFT)
+  posSaleId        String?
+  posSale          Sale?                 @relation(fields: [posSaleId], references: [id])
+  notes            String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  items            InvoiceItem[]
+  payments         InvoicePayment[]
+  creditNotes      CreditNote[]
+  einvoiceSubmissions EinvoiceSubmission[]
+
+  @@unique([branchId, invoiceNo])
+  @@index([customerId, status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id])
+  description  String
+  qty          Decimal  @db.Decimal(12, 2)
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  lineDiscount Decimal  @db.Decimal(12, 2) @default("0")
+  lineTotal    Decimal  @db.Decimal(12, 2)
+  taxCode      String?
+  creditNoteItems CreditNoteItem[]
+
+  @@map("invoice_items")
+}
+
+model InvoicePayment {
+  id        String         @id @default(cuid())
+  invoiceId String
+  invoice   Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  method    PaymentMethod
+  amount    Decimal        @db.Decimal(12, 2)
+  reference String?
+  paidAt    DateTime       @default(now())
+
+  @@map("invoice_payments")
+}
+
+model CreditNote {
+  id              String            @id @default(cuid())
+  creditNoteNo    String
+  branchId        String
+  branch          Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  invoiceId       String
+  invoice         Invoice           @relation(fields: [invoiceId], references: [id])
+  reason          String
+  itemsTotal      Decimal           @db.Decimal(12, 2)
+  discountTotal   Decimal           @db.Decimal(12, 2) @default("0")
+  taxableSubtotal Decimal           @db.Decimal(12, 2)
+  sst             Decimal           @db.Decimal(12, 2)
+  grandTotal      Decimal           @db.Decimal(12, 2)
+  currency        String            @default("MYR")
+  status          CreditNoteStatus  @default(ISSUED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  items           CreditNoteItem[]
+
+  @@unique([branchId, creditNoteNo])
+  @@map("credit_notes")
+}
+
+model CreditNoteItem {
+  id             String        @id @default(cuid())
+  creditNoteId   String
+  creditNote     CreditNote    @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  invoiceItemId  String?
+  invoiceItem    InvoiceItem?  @relation(fields: [invoiceItemId], references: [id])
+  description    String
+  qty            Decimal       @db.Decimal(12, 2)
+  unitPrice      Decimal       @db.Decimal(12, 2)
+  lineDiscount   Decimal       @db.Decimal(12, 2) @default("0")
+  lineTotal      Decimal       @db.Decimal(12, 2)
+  taxCode        String?
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id])
+
+  @@map("credit_note_items")
+}
+
+model EinvoiceSubmission {
+  id            String                    @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice                   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  provider      EinvoiceProvider          @default(MOCK)
+  payload       Json
+  submissionId  String?
+  status        EinvoiceSubmissionStatus  @default(PENDING)
+  lastError     String?
+  attempts      Int                       @default(0)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  lastPolledAt  DateTime?
+  timeoutAt     DateTime?
+
+  @@index([invoiceId])
+  @@map("einvoice_submissions")
 }
 
 model Ticket {
