@@ -98,7 +98,7 @@ Pastikan Postgres tersedia sebelum menjalankan migrasi.
    git clone https://github.com/example/WhatsApp-Bot-POS-SuperApp-MVP.git
    cd WhatsApp-Bot-POS-SuperApp-MVP
    ```
-2. **Sediakan konfigurasi** – salin `.env.example` kepada `.env` dan isi nilai sebenar untuk domain, e-mel Let's Encrypt, kata laluan Postgres, rahsia JWT/cookies, kunci reCAPTCHA, akses MinIO, `AI_API_KEY`, dan `PUBLIC_URL`.
+2. **Sediakan konfigurasi** – salin `.env.example` kepada `.env` dan isi nilai sebenar untuk domain, e-mel Let's Encrypt, kata laluan Postgres, rahsia JWT/cookies, kunci reCAPTCHA, akses MinIO, dan `PUBLIC_URL`. (Opsyenal: sediakan `AI_API_KEY` jika integrasi AI diaktifkan pada masa hadapan.)
    - Jika mahu menggunakan Docker secrets, letak fail dalam `deploy/secrets/` (cth. `jwt_secret`) dan biarkan nilai `_FILE` kosong di `.env`. Untuk mematikan secrets, padam atau komen blok `secrets:` pada `docker-compose.yml` serta rujukan `secrets:` pada servis berkaitan.
 3. **Naikkan stack** – jalankan semua servis latar:
    ```bash

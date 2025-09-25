@@ -12,7 +12,7 @@ type Conversation = {
 const initialConversations: Conversation[] = [
   {
     customer: 'Aina',
-    lastMessage: 'Boleh saya dapatkan status pesanan? ',
+    lastMessage: 'Boleh saya dapatkan status pesanan?',
     sentiment: 'Neutral',
     updatedAt: '09:20'
   },

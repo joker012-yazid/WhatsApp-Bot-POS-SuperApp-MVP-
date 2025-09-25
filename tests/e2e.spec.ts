@@ -1,7 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 test('end-to-end operations happy path', async ({ page }) => {
   await page.goto('/login');
   await expect(page.locator('h2')).toHaveText('Sign in');
@@ -32,6 +30,7 @@ test('end-to-end operations happy path', async ({ page }) => {
   const receiptCell = page.locator('[data-testid="pos-table"] tbody tr').first().locator('td').first();
   const receipt = await receiptCell.innerText();
   await page.click(`[data-testid="print-${receipt}"]`);
-  await delay(100);
-  await expect(page.locator(`text=PDF print queued for ${receipt}.`)).toBeVisible();
+  await expect(page.locator('[data-testid="pos-print-status"]')).toHaveText(
+    `PDF print queued for ${receipt}.`
+  );
 });

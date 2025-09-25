@@ -211,6 +211,35 @@ export class PosService {
     const totals = calculateSaleTotals(dto.items);
 
     const sale = await this.prisma.$transaction(async (tx) => {
+      const requestedByProduct = new Map<string, number>();
+      for (const item of dto.items) {
+        const current = requestedByProduct.get(item.productId) ?? 0;
+        requestedByProduct.set(item.productId, current + item.quantity);
+      }
+
+      if (requestedByProduct.size > 0) {
+        const products = await tx.product.findMany({
+          where: { id: { in: Array.from(requestedByProduct.keys()) } },
+          select: { id: true, name: true, stockQty: true }
+        });
+
+        const missingProductId = Array.from(requestedByProduct.keys()).find(
+          (productId) => !products.some((product) => product.id === productId)
+        );
+        if (missingProductId) {
+          throw new BadRequestException(`Product ${missingProductId} not found`);
+        }
+
+        for (const product of products) {
+          const requested = requestedByProduct.get(product.id) ?? 0;
+          if ((product.stockQty ?? 0) < requested) {
+            throw new BadRequestException(
+              `Insufficient stock for ${product.name ?? product.id}`
+            );
+          }
+        }
+      }
+
       const receiptNo = await this.generateReceiptNo(tx, dto.branchId);
       const sale = await tx.sale.create({
         data: {

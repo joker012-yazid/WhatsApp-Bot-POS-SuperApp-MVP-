@@ -249,7 +249,9 @@ export default function PosPage() {
           </button>
         </form>
         {printedReceipt ? (
-          <p className="subheading">PDF print queued for {printedReceipt}.</p>
+          <p className="subheading" data-testid="pos-print-status">
+            PDF print queued for {printedReceipt}.
+          </p>
         ) : null}
         {invoiceDraftMessage ? <p className="subheading">{invoiceDraftMessage}</p> : null}
         {linkMessage ? <p className="subheading">{linkMessage}</p> : null}
