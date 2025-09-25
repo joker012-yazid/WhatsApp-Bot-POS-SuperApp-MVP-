@@ -1,0 +1,263 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  AGENT
+  CASHIER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  EWALLET
+}
+
+enum WaMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WaSessionStatus {
+  ACTIVE
+  PAUSED
+  DISCONNECTED
+}
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  passwordHash  String
+  fullName      String
+  role          Role        @default(AGENT)
+  isActive      Boolean     @default(true)
+  totpSecret    String?
+  totpEnabled   Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  ticketsAssigned Ticket[]  @relation("TicketAssignee")
+  auditLogs     AuditLog[]  @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Branch {
+  id                String       @id @default(cuid())
+  code              String       @unique
+  name              String
+  timezone          String       @default("Asia/Kuala_Lumpur")
+  operatingHours    Json?
+  selfSignupEnabled Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  products          Product[]
+  sales             Sale[]
+  waSessions        WaSession[]
+
+  @@map("branches")
+}
+
+model Customer {
+  id             String            @id @default(cuid())
+  fullName       String
+  phone          String            @unique
+  email          String?
+  tags           String[]          @default([])
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  tickets        Ticket[]
+  sales          Sale[]
+  interactions   CrmInteraction[]
+  formSubmissions FormSubmission[]
+
+  @@index([phone])
+  @@map("customers")
+}
+
+model Product {
+  id         String    @id @default(cuid())
+  branchId   String
+  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name       String
+  sku        String
+  priceCents Int
+  stockQty   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  saleItems  SaleItem[]
+
+  @@unique([branchId, sku])
+  @@index([branchId, name])
+  @@map("products")
+}
+
+model Sale {
+  id             String        @id @default(cuid())
+  branchId       String
+  branch         Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customerId     String?
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  paymentMethod  PaymentMethod
+  subtotalCents  Int
+  discountCents  Int           @default(0)
+  taxCents       Int
+  totalCents     Int
+  receiptNo      String        @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  items          SaleItem[]
+  auditLogs      AuditLog[]
+
+  @@index([branchId, createdAt(sort: Desc)])
+  @@map("sales")
+}
+
+model SaleItem {
+  id            String   @id @default(cuid())
+  saleId        String
+  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPrice     Int
+  discountCents Int      @default(0)
+  totalCents    Int
+  createdAt     DateTime @default(now())
+
+  @@map("sale_items")
+}
+
+model Ticket {
+  id            String            @id @default(cuid())
+  customerId    String?
+  customer      Customer?         @relation(fields: [customerId], references: [id])
+  waSessionId   String?
+  waSession     WaSession?        @relation(fields: [waSessionId], references: [id])
+  subject       String
+  description   String
+  status        TicketStatus      @default(OPEN)
+  priority      Int               @default(3)
+  assigneeId    String?
+  assignee      User?             @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  interactions  CrmInteraction[]
+  aiSuggestions AiSuggestion[]
+  auditLogs     AuditLog[]        @relation("TicketAudit")
+
+  @@index([customerId, status])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("tickets")
+}
+
+model WaSession {
+  id              String          @id @default(cuid())
+  branchId        String?
+  branch          Branch?         @relation(fields: [branchId], references: [id])
+  label           String
+  status          WaSessionStatus @default(ACTIVE)
+  lastConnectedAt DateTime?
+  isPaused        Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  messages        WaMessage[]
+  tickets         Ticket[]
+
+  @@map("wa_sessions")
+}
+
+model WaMessage {
+  id        String              @id @default(cuid())
+  sessionId String
+  session   WaSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  direction WaMessageDirection
+  payload   Json
+  createdAt DateTime            @default(now())
+
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("wa_messages")
+}
+
+model CrmInteraction {
+  id          String     @id @default(cuid())
+  customerId  String?
+  customer    Customer?  @relation(fields: [customerId], references: [id])
+  ticketId    String?
+  ticket      Ticket?    @relation(fields: [ticketId], references: [id])
+  channel     String
+  summary     String?
+  payload     Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  suggestions AiSuggestion[]
+
+  @@map("crm_interactions")
+}
+
+model Form {
+  id          String            @id @default(cuid())
+  title       String
+  description String?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  submissions FormSubmission[]
+
+  @@map("forms")
+}
+
+model FormSubmission {
+  id          String     @id @default(cuid())
+  formId      String
+  form        Form       @relation(fields: [formId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer?  @relation(fields: [customerId], references: [id])
+  payload     Json
+  submittedAt DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("form_submissions")
+}
+
+model AiSuggestion {
+  id             String           @id @default(cuid())
+  ticketId       String?
+  ticket         Ticket?          @relation(fields: [ticketId], references: [id])
+  interactionId  String?
+  interaction    CrmInteraction?  @relation(fields: [interactionId], references: [id])
+  suggestion     String
+  confidence     Float?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@map("ai_suggestions")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
+  ticketId  String?
+  ticket    Ticket?  @relation("TicketAudit", fields: [ticketId], references: [id])
+  saleId    String?
+  sale      Sale?    @relation(fields: [saleId], references: [id])
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}

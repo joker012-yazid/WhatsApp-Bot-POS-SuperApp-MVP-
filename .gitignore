@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store
+.DS_Store
+.env
+.env.local
+pnpm-lock.yaml
+.next
+coverage
+sessions
+postgres-data
+redis-data
+minio-data
+certbot
+playwright-report
+test-results

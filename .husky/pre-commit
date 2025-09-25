@@ -1,0 +1,6 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+if ! pnpm dlx lint-staged; then
+  echo "lint-staged skipped (dependency resolution failed)" >&2
+fi

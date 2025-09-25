@@ -1,117 +1,194 @@
-0) Prasyarat
+# SPEC-1 — WhatsApp Bot + POS SuperApp (MVP)
 
-A‑record DNS → IP VM telah ditetapkan.
+Monorepo pnpm workspace yang merangkumi:
+- **apps/web** – Next.js App Router frontend.
+- **apps/api** – NestJS API dengan Prisma & PostgreSQL.
+- **apps/worker** – BullMQ worker untuk queues operasi dan backup.
+- **apps/baileys** – WhatsApp gateway berasaskan Baileys dengan token bucket Redis.
+- **apps/print-server** – Jambatan ESC/POS pilihan untuk cetakan resit/tiket.
+  - Sertakan worker BullMQ, endpoint REST, dan CLI ujian `pnpm --filter print-server cli`.
+- **packages/ui** – Komponen React kongsi (Button, Card, dsb.).
+- **packages/config** – Kongsi konfigurasi ESLint/tsconfig serta definisi queue.
+- **packages/sdk** – Klien OpenAPI ringan (`openapi-fetch`).
+- **deploy/** – Konfigurasi Nginx & alat infra.
 
-Port 80/443 dibuka ke VM (NAT/port‑forward jika perlu).
+## Prasyarat
+- Node.js 20+
+- pnpm 8+
+- Docker + Docker Compose
 
-Akaun sudo pada VM.
+## Persediaan
+1. `cp .env.example .env` dan kemaskini nilai sebenar (DB, rahsia, domain, dsb.). Tetapkan `RECAPTCHA_SITE_KEY`/`RECAPTCHA_SECRET` untuk perlindungan login serta pastikan kata laluan mematuhi polisi (≥12 aksara, campuran huruf besar/kecil, nombor & simbol).
+2. Sediakan fail rahsia Docker (untuk pengeluaran) di `deploy/secrets/` seperti `jwt_secret`, `jwt_refresh_secret`, `session_cookie_secret`, `recaptcha_secret`, dan `minio_secret_key` kemudian kemaskini rujukan `_FILE` dalam `.env` jika digunakan.
+3. Jalankan `pnpm install` di akar repo.
 
-1) Pasang Keperluan Sistem
+## Skrip Akar
+| Skrip | Perihal |
+| --- | --- |
+| `pnpm build` | Bina semua aplikasi & pakej. |
+| `pnpm dev` | Jalankan mod pembangunan selari (web, api, worker, baileys, print-server). |
+| `pnpm lint` | Jalankan ESLint merentasi workspace. |
+| `pnpm test` | Jalankan ujian Jest yang tersedia. |
+| `pnpm prisma:migrate` | Jalankan migrasi Prisma melalui servis API. |
+| `pnpm prisma:seed` | Isi data contoh Prisma. |
+
+## Format Ralat API
+Semua controller NestJS menggunakan penapis pengecualian tersuai dan mengembalikan respons JSON konsisten. Contoh:
+
+```json
+{
+  "statusCode": 400,
+  "errorCode": "BAD_REQUEST",
+  "message": "Discount cannot exceed line total",
+  "timestamp": "2024-04-27T03:15:00.000Z",
+  "path": "/api/pos/sales"
+}
 ```
-sudo apt update && sudo apt -y upgrade
-# Docker & Compose
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-newgrp docker
-# Node (jika perlu untuk dev tools)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt -y install nodejs make git unzip
-```
 
-2) Klon Repo & Struktur Deploy
-```
-cd /opt && sudo mkdir app && sudo chown $USER:$USER app
-cd /opt/app
-git clone <REPO_URL> whatsapp-pos
-cd whatsapp-pos
-```
+Nilai `errorCode` akan disetkan kepada kod khusus jika disediakan, atau dihasilkan daripada status HTTP (cth. `NOT_FOUND`, `RATE_LIMITED`). Middleware redaksi PII memastikan medan sensitif seperti kata laluan, e-mel, dan nombor telefon tidak direkodkan dalam log JSON Pino.
 
-3) Isi Konfigurasi .env
-```
-Salin .env contoh dan ubah nilai berikut (minimum):
-
+## Pembangunan Tempatan
+```bash
+pnpm install
 cp .env.example .env
-nano .env
-# Tetapkan: POSTGRES_PASSWORD, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD, JWT_SECRET,
-# AI_API_KEY, PUBLIC_URL=https://whatsappbot.laptoppro.my
+pnpm dev
+```
+Perkhidmatan akan tersedia pada port lalai (Next.js 3000, API 3001, Baileys 4001/4002, Print Server 4010).
+
+## Docker Compose
+```bash
+docker compose up -d --build
+```
+Komponen termasuk Nginx reverse proxy, Next.js, API, worker, Baileys, print-server, PostgreSQL, Redis, MinIO, serta profil certbot.
+
+### Ujian Print Server
+Gunakan CLI contoh untuk menghantar resit ujian ke pencetak rangkaian ESC/POS:
+```bash
+pnpm --filter print-server cli -- --host 192.168.0.50 --port 9100 --url http://localhost:4010
+```
+Pastikan parameter `PRINT_SERVER_URL` dan konfigurasi peranti ditetapkan sebelum mencetak dari API (`POST /api/pos/print/{saleId}`).
+
+## Prisma
+```bash
+pnpm prisma:migrate
+pnpm prisma:seed
+```
+Pastikan Postgres tersedia sebelum menjalankan migrasi.
+
+## Makefile Ringkas
+| Perintah | Fungsi |
+| --- | --- |
+| `make install` | `pnpm install` |
+| `make build` | `pnpm build` |
+| `make dev` | `pnpm dev` |
+| `make lint` | `pnpm lint` |
+| `make test` | `pnpm test` |
+| `make migrate` | `pnpm prisma:migrate` |
+| `make seed` | `pnpm prisma:seed` |
+| `make docker-up` | `docker compose up -d --build` |
+| `make docker-down` | `docker compose down` |
+| `make logs` | `docker compose logs -f` |
+
+## Nota Tambahan
+- Zon masa lalai: `Asia/Kuala_Lumpur`.
+- Reverse proxy menguatkuasakan HSTS, gzip, dan laluan khusus (`/api`, `/ws`, `/print`).
+- Queue BullMQ dikongsi melalui `@spec/config/queues` untuk kekonsistenan antara worker & print-server.
+- Akaun ADMIN boleh mengaktifkan 2FA TOTP melalui endpoint `POST /api/auth/totp/setup` diikuti `POST /api/auth/totp/verify`; kod diperlukan semasa login selepas diaktifkan.
+- Endpoint login disekat dengan reCAPTCHA (Google v2/v3) dan polisi kata laluan yang ketat; konfigurasi rahsia boleh dipasang melalui Docker secrets untuk mengelakkan nilai sensitif dalam `.env`.
+
+## Panduan Deploy (Ubuntu LTS)
+
+Dokumen ini menerangkan langkah minimum untuk menyediakan persekitaran produksi di VM Ubuntu 22.04 LTS (atau versi LTS semasa).
+
+### 1. Prasyarat
+- VM Ubuntu LTS dengan akses sudo dan DNS `whatsappbot.laptoppro.my` yang menunjuk ke IP VM.
+- Rekod DNS tambahan untuk `*.whatsappbot.laptoppro.my` jika ingin melayan subdomain tambahan.
+- Port `80` dan `443` dibuka kepada umum.
+- Akaun e-mel untuk pemberitahuan Let's Encrypt (cth. `ops@domain`).
+- Storan sekurang-kurangnya 50GB untuk Postgres dump & objek MinIO.
+
+### 2. Pasang Docker & Docker Compose
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y ca-certificates curl gnupg lsb-release
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+# log keluar & masuk semula untuk kumpulan docker berkuat kuasa
 ```
 
-4) Jalankan Stack (tanpa TLS dahulu)
+### 3. Klon Repo & Konfigurasi
+```bash
+git clone https://github.com/example/WhatsApp-Bot-POS-SuperApp-MVP.git
+cd WhatsApp-Bot-POS-SuperApp-MVP
+cp .env.example .env
 ```
+
+Kemas kini `.env` dengan kredensial produksi:
+- Tetapkan kata laluan rawak untuk Postgres, Redis, JWT, cookies.
+- Tetapkan domain sebenar, kunci reCAPTCHA, rahsia MinIO.
+- Jika menggunakan Docker secrets, letak fail rahsia di `deploy/secrets/` dan rujuk `_FILE` dalam `.env`.
+
+### 4. Jalankan Stack
+```bash
 docker compose pull
-docker compose up -d postgres redis minio api web worker baileys proxy
-# Semak
-docker compose ps
-docker compose logs -f --tail=200 proxy
+docker compose up -d --build
 ```
 
-5) Perolehi Sijil TLS & Auto‑Renew
+Periksa status:
+```bash
+docker compose ps
+docker compose logs proxy
 ```
-# 1‑kali: dapatkan sijil
+
+### 5. Certbot Once & Renew
+```bash
 docker compose run --rm certbot-once
-# hidupkan auto‑renew
-docker compose up -d certbot-renew
+docker compose run --rm certbot-renew --dry-run
 ```
 
-6) Buat Akaun Admin Pertama & Pautkan WhatsApp
-
-Buka https://whatsappbot.laptoppro.my → daftar pengguna pertama (role ADMIN auto).
-
-Settings → WhatsApp Session → imbas QR (Baileys) → hantar mesej ujian.
-
-7) Ujian Kesihatan
+Selepas sijil diperoleh, reload Nginx:
+```bash
+docker compose exec proxy nginx -s reload
 ```
-# API health
-curl -k https://whatsappbot.laptoppro.my/api/health
-# Semak servis
-docker compose ps
+Tambahkan cron host untuk pembaharuan automatik bulanan:
+```bash
+(crontab -l; echo "0 3 1 * * cd /opt/WhatsApp-Bot-POS-SuperApp-MVP && docker compose run --rm certbot-renew && docker compose exec proxy nginx -s reload") | crontab -
 ```
 
-8) Firewall & Keselamatan Ringkas
-```
-# Contoh ufw
-sudo ufw allow 80,443/tcp
+### 6. Health Check
+- API: `curl -k https://whatsappbot.laptoppro.my/api/health` (patut kembalikan `{"status":"ok","gitSha":"..."}`).
+- Web: semak `https://whatsappbot.laptoppro.my` dalam pelayar.
+- Worker/Baileys: `docker compose logs worker`, `docker compose logs baileys` untuk pastikan tiada ralat sambungan Redis/Postgres.
+
+### 7. Firewall
+Gunakan `ufw` untuk hadkan akses SSH dan buka port web:
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw enable
-# Pastikan port DB/Redis/MinIO tidak dibuka ke luar
+sudo ufw status
 ```
 
-9) Backup & Retensi
+### 8. Backup & Restore
+- **Database**: Worker `BACKUP_DAILY` akan menjalankan stub `pg_dump`. Untuk produksi, gantikan dengan arahan sebenar `pg_dump` ke direktori yang dipasang ke MinIO/S3.
+- **Objek**: Konfigurasikan lifecycle MinIO atau replikasi ke S3 sekunder.
+- Uji restore bulanan: muat turun dump terkini, pulihkan ke instans Postgres staging, dan jalankan `pnpm prisma:migrate deploy` untuk sahkan.
 
-Backup harian DB: BACKUP_DAILY job aktif (lihat Pelaksanaan → Backup).
+### 9. Naik Taraf
+- Untuk kemas kini aplikasi: `git pull`, `docker compose build --pull`, `docker compose up -d`.
+- Untuk patch OS: `sudo apt update && sudo apt upgrade -y`, reboot jika perlu (`sudo reboot`).
+- Semak `CHANGELOG.md` (jika ada) sebelum naik taraf.
 
-Simpanan MinIO berada pada volume deploy/letsencrypt & minio-data (mount ke NAS jika ada).
-
-10) Naik Taraf (Zero/minimal downtime)
-```
-git pull
-# rebuild imej jika perlu
-docker compose pull && docker compose up -d
-# semak migrasi prisma
-docker compose exec api pnpm prisma migrate deploy
-```
-
-11) Rollback Pantas
-```
-# lihat imej terdahulu
-docker images | head
-# jalankan semula menggunakan tag sebelumnya
-# contoh: docker compose up -d api:web@<TAG_LAMA>
-```
-
-12) Troubleshooting Ringkas
-```
-# Log ikut servis
-docker compose logs -f --tail=200 api
-# Status Baileys
-docker compose logs -f baileys | grep -i connection
-# Proxy/Nginx
-docker compose logs -f proxy
-```
-
-13) Penyelenggaraan Berkala
-
-Semak auto‑renew TLS (fail log letsencrypt/ & reload nginx).
-
-Jalankan QR re‑login drill mingguan (Isnin 09:30 MYT) seperti Playbook.
-
-Uji pemulihan backup sekurang‑kurangnya sebulan sekali.
+### 10. Troubleshooting
+- `docker compose logs <service>` untuk jejak ralat.
+- Pastikan `DATABASE_URL` dan `REDIS_URL` betul; worker/Baileys memerlukan Redis untuk token bucket dan queue.
+- Jika API gagal boot, semak migrasi Prisma (`docker compose exec api pnpm prisma migrate deploy`).
+- TLS gagal? Pastikan port 80/443 terbuka dan rekod DNS tepat.
+- Prestasi lambat: semak `docker stats`, pantau Postgres (`docker compose exec postgres psql -c "SELECT now();"`).
