@@ -18,7 +18,7 @@ import { PrintSaleDto } from './dto/print-sale.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { Role } from '../common/constants/prisma.enums';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -39,8 +39,12 @@ export class PosController {
 
   @Roles(Role.ADMIN, Role.MANAGER)
   @Put('products/:id')
-  updateProduct(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.posService.updateProduct(id, dto);
+  updateProduct(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+    @CurrentUser() user: any
+  ) {
+    return this.posService.updateProduct(id, dto, user?.userId);
   }
 
   @Roles(Role.ADMIN)

@@ -1,5 +1,5 @@
 import { IsEnum, IsNotEmpty, IsObject, IsString } from 'class-validator';
-import { WaMessageDirection } from '@prisma/client';
+import { WaMessageDirection } from '../../common/constants/prisma.enums';
 
 export class CreateMessageDto {
   @IsString()

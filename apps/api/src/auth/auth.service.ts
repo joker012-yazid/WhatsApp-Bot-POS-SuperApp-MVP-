@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { JwtService } from '@nestjs/jwt';
-import { Role, User } from '@prisma/client';
+import { Role } from '../common/constants/prisma.enums';
 import * as argon2 from 'argon2';
 import { BootstrapDto } from './dto/bootstrap.dto';
 import { LoginDto } from './dto/login.dto';
@@ -20,6 +20,16 @@ const REFRESH_TOKEN_TTL = '7d';
 const PASSWORD_POLICY = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{12,}$/;
 const PASSWORD_POLICY_MSG =
   'Password must be at least 12 characters and include uppercase, lowercase, numeric, and symbol characters.';
+
+type UserEntity = {
+  id: string;
+  email: string;
+  role: Role;
+  passwordHash: string;
+  totpEnabled: boolean;
+  totpSecret?: string | null;
+  [key: string]: any;
+};
 
 @Injectable()
 export class AuthService {
@@ -39,7 +49,7 @@ export class AuthService {
     return readSecret('JWT_REFRESH_SECRET', { fallback: defaultSecret }) ?? defaultSecret;
   }
 
-  private async signTokens(user: User) {
+  private async signTokens(user: UserEntity) {
     const payload = { sub: user.id, email: user.email, role: user.role };
     const secret = this.getJwtSecret();
     const refreshSecret = this.getRefreshSecret(secret);
@@ -52,7 +62,7 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private sanitizeUser(user: User) {
+  private sanitizeUser(user: UserEntity) {
     const { passwordHash: _passwordHash, totpSecret: _totpSecret, ...safe } = user;
     return safe;
   }
@@ -84,7 +94,7 @@ export class AuthService {
     }
   }
 
-  private ensureAdminTotp(user: User, token?: string) {
+  private ensureAdminTotp(user: UserEntity, token?: string) {
     if (user.role !== Role.ADMIN || !user.totpEnabled) {
       return;
     }

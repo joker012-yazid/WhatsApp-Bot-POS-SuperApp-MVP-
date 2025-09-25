@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { Role } from '../common/constants/prisma.enums';
 import { TotpTokenDto } from './dto/totp-token.dto';
 
 @Controller('auth')

@@ -9,7 +9,7 @@ import {
   UseGuards
 } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
-import { TicketStatus, Role } from '@prisma/client';
+import { TicketStatus, Role } from '../common/constants/prisma.enums';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TransitionTicketDto } from './dto/transition-ticket.dto';

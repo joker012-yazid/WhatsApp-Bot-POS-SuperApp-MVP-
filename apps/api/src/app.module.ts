@@ -10,6 +10,7 @@ import { TicketsModule } from './tickets/tickets.module';
 import { PosModule } from './pos/pos.module';
 import { FilesModule } from './files/files.module';
 import { HealthModule } from './health/health.module';
+import { CacheModule } from './common/cache/cache.module';
 
 @Module({
   imports: [
@@ -27,7 +28,8 @@ import { HealthModule } from './health/health.module';
     TicketsModule,
     PosModule,
     FilesModule,
-    HealthModule
+    HealthModule,
+    CacheModule
   ],
   providers: [PrismaService]
 })

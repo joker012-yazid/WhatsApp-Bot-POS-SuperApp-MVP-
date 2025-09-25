@@ -1,5 +1,5 @@
 import { IsEnum, IsOptional, IsString, Min, Max } from 'class-validator';
-import { TicketStatus } from '@prisma/client';
+import { TicketStatus } from '../../common/constants/prisma.enums';
 
 export class CreateTicketDto {
   @IsOptional()

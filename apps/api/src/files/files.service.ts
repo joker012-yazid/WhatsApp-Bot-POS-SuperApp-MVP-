@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { Client } from 'minio';
 import { readSecret } from '../common/secret.util';
+import { PrismaService } from '../common/prisma.service';
 
 @Injectable()
 export class FilesService {
   private readonly client: Client;
   private readonly bucket: string;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     const endpoint = process.env.MINIO_ENDPOINT || 'minio:9000';
     const [endPoint, portString] = endpoint.split(':');
     const accessKey = readSecret('MINIO_ACCESS_KEY', { fallback: 'specminio' }) ?? 'specminio';
@@ -38,10 +39,21 @@ export class FilesService {
     return { bucket: this.bucket, key, url, expiresInSeconds: expiry };
   }
 
-  async presignDownload(key: string, expiresInSeconds?: number) {
+  async presignDownload(key: string, expiresInSeconds?: number, actorId?: string) {
     await this.ensureBucket();
     const expiry = expiresInSeconds ?? 900;
     const url = await this.client.presignedGetObject(this.bucket, key, expiry);
+    await this.prisma.auditLog.create({
+      data: {
+        actorId,
+        action: 'EXPORT_PRESIGNED',
+        details: {
+          bucket: this.bucket,
+          key,
+          expiresInSeconds: expiry
+        }
+      }
+    });
     return { bucket: this.bucket, key, url, expiresInSeconds: expiry };
   }
 }

@@ -9,7 +9,7 @@ import {
   Min,
   ValidateNested
 } from 'class-validator';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod } from '../../common/constants/prisma.enums';
 
 class SaleItemDto {
   @IsString()

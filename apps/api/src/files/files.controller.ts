@@ -5,7 +5,8 @@ import { PresignDownloadDto } from './dto/presign-download.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { Role } from '../common/constants/prisma.enums';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('files')
@@ -21,8 +22,8 @@ export class FilesController {
 
   @Roles(Role.ADMIN, Role.MANAGER, Role.AGENT)
   @Post('presign/download')
-  presignDownload(@Body() dto: PresignDownloadDto) {
+  presignDownload(@Body() dto: PresignDownloadDto, @CurrentUser() user: any) {
     const expires = dto.expiresInSeconds ? Number(dto.expiresInSeconds) : undefined;
-    return this.filesService.presignDownload(dto.key, expires);
+    return this.filesService.presignDownload(dto.key, expires, user?.userId);
   }
 }
