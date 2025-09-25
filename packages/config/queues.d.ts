@@ -8,6 +8,8 @@ export declare const QueueNames: {
   readonly PDF_INVOICE: 'PDF_INVOICE';
   readonly BACKUP_DAILY: 'BACKUP_DAILY';
   readonly PRINT_JOB: 'PRINT_JOB';
+  readonly EINVOICE_SUBMIT: 'EINVOICE_SUBMIT';
+  readonly EINVOICE_STATUS_POLL: 'EINVOICE_STATUS_POLL';
 };
 
 export type QueueName = (typeof QueueNames)[keyof typeof QueueNames];

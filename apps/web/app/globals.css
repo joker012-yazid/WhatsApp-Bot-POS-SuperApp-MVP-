@@ -320,6 +320,243 @@ select {
   gap: 0.75rem;
 }
 
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gap-md {
+  gap: 1.25rem;
+}
+
+.gap-lg {
+  gap: 1.75rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.form-row label,
+.form-full {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-row input,
+.form-full textarea,
+.form-row select,
+.form-lines__row input,
+.form-lines__row select,
+.form-lines__row textarea {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.form-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.form-lines__header {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.form-lines__row {
+  display: grid;
+  grid-template-columns: 2fr repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .form-lines__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-summary ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.primary,
+.secondary,
+.actions button,
+.action-grid button {
+  border-radius: 0.75rem;
+  border: none;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary,
+.actions button.primary,
+.action-grid button.primary {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.secondary,
+.actions button.secondary,
+.action-grid button.secondary {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.primary:hover,
+.secondary:hover,
+.actions button:hover,
+.action-grid button:hover,
+.table .actions .link:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.table .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.table-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.table-actions select {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.link {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.toast {
+  background: var(--accent-soft);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .detail-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.generated-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.generated-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  background: var(--surface-muted);
+  padding: 0.75rem 1rem;
+  border-radius: 0.85rem;
+}
+
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--surface-muted);
+  padding: 0.75rem 1rem;
+  border-radius: 0.85rem;
+}
+
+.timeline li span:first-child {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
 .gap-md {
   gap: 1rem;
 }

@@ -1,4 +1,5 @@
 import { QueueNames as Names } from '@spec/config/queues';
+import { EinvoiceProvider } from '@prisma/client';
 
 export const QueueNames = Names;
 
@@ -65,6 +66,18 @@ export type PrintJob = {
   };
 };
 
+export type EinvoiceSubmitJob = {
+  invoiceId: string;
+  provider?: EinvoiceProvider;
+};
+
+export type EinvoiceStatusPollJob = {
+  submissionId: string;
+  remoteSubmissionId: string;
+  provider: EinvoiceProvider;
+  attempt?: number;
+};
+
 export type QueuePayload<T extends QueueName = QueueName> = T extends typeof QueueNames.CHAT_INBOUND
   ? ChatInboundJob
   : T extends typeof QueueNames.SEND_TEMPLATE
@@ -79,4 +92,8 @@ export type QueuePayload<T extends QueueName = QueueName> = T extends typeof Que
             ? BackupJob
             : T extends typeof QueueNames.PRINT_JOB
               ? PrintJob
-              : Record<string, unknown>;
+              : T extends typeof QueueNames.EINVOICE_SUBMIT
+                ? EinvoiceSubmitJob
+                : T extends typeof QueueNames.EINVOICE_STATUS_POLL
+                  ? EinvoiceStatusPollJob
+                  : Record<string, unknown>;

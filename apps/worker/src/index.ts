@@ -1,10 +1,34 @@
 import { Queue, Worker, QueueEvents, JobsOptions, Job } from 'bullmq';
-import { QueueNames, ChatInboundJob, SendTemplateJob, ReminderJob, MediaProcessJob, PdfInvoiceJob, BackupJob, TemplateType } from './queues';
+import {
+  QueueNames,
+  ChatInboundJob,
+  SendTemplateJob,
+  ReminderJob,
+  MediaProcessJob,
+  PdfInvoiceJob,
+  BackupJob,
+  TemplateType,
+  EinvoiceSubmitJob,
+  EinvoiceStatusPollJob
+} from './queues';
 import { QueueList } from '@spec/config/queues';
 import IORedis from 'ioredis';
 import pino from 'pino';
 import cron from 'node-cron';
-import { PrismaClient, TicketStatus, WaMessageDirection } from '@prisma/client';
+import {
+  PrismaClient,
+  Prisma,
+  TicketStatus,
+  WaMessageDirection,
+  EinvoiceSubmissionStatus,
+  EinvoiceProvider as PrismaEinvoiceProvider
+} from '@prisma/client';
+import {
+  createEinvoiceProvider,
+  EinvoicePayload,
+  EinvoiceSubmitResult,
+  EinvoiceStatusResult
+} from './einvoice/provider';
 import { Client as MinioClient } from 'minio';
 import PDFDocument from 'pdfkit';
 import { readFileSync } from 'fs';
@@ -43,6 +67,12 @@ const minio = new MinioClient({
 
 const defaultBucket = process.env.MINIO_BUCKET || 'uploads';
 
+const DEFAULT_EINVOICE_PROVIDER = parseEinvoiceProvider(process.env.EINVOICE_PROVIDER);
+const EINVOICE_TIMEOUT_HOURS = Number(process.env.EINVOICE_TIMEOUT_HOURS ?? 24);
+const EINVOICE_MAX_ATTEMPTS = Number(process.env.EINVOICE_MAX_ATTEMPTS ?? 5);
+const EINVOICE_BASE_POLL_SECONDS = Number(process.env.EINVOICE_POLL_SECONDS ?? 600);
+const EINVOICE_MAX_POLL_SECONDS = Number(process.env.EINVOICE_POLL_MAX_SECONDS ?? 3600);
+
 async function ensureBucket(bucket: string) {
   try {
     const exists = await minio.bucketExists(bucket);
@@ -60,6 +90,127 @@ const queues = QueueList.reduce<Record<string, Queue>>((acc, name) => {
   acc[name] = new Queue(name, { connection });
   return acc;
 }, {});
+
+type InvoiceWithRelations = Prisma.InvoiceGetPayload<{
+  include: { branch: true; customer: true; items: true; payments: true };
+}>;
+
+function parseEinvoiceProvider(value?: string): PrismaEinvoiceProvider {
+  switch ((value ?? '').toUpperCase()) {
+    case 'MYINVOIS':
+      return PrismaEinvoiceProvider.MYINVOIS;
+    case 'PEPPOL':
+      return PrismaEinvoiceProvider.PEPPOL;
+    case 'MOCK':
+    default:
+      return PrismaEinvoiceProvider.MOCK;
+  }
+}
+
+function getEinvoiceProviderOptions() {
+  return {
+    endpoint: process.env.EINVOICE_ENDPOINT,
+    apiKey: process.env.EINVOICE_API_KEY,
+    environment: process.env.EINVOICE_ENV
+  };
+}
+
+function calculateEinvoicePollDelay(attempt: number) {
+  const base = Math.max(30, EINVOICE_BASE_POLL_SECONDS);
+  const max = Math.max(base, EINVOICE_MAX_POLL_SECONDS);
+  const delaySeconds = Math.min(base * 2 ** attempt, max);
+  const jitter = Math.floor(Math.random() * 1000);
+  return delaySeconds * 1000 + jitter;
+}
+
+function buildEinvoicePayload(invoice: InvoiceWithRelations): EinvoicePayload {
+  const taxRate = Number(invoice.taxableSubtotal) > 0 ? Number(invoice.sst) / Number(invoice.taxableSubtotal) : 0.06;
+  const items = invoice.items.map((item) => {
+    const quantity = Number(item.qty);
+    const unitPrice = Number(item.unitPrice);
+    const discount = Number(item.lineDiscount ?? 0);
+    const lineTotal = Number(item.lineTotal);
+    const taxableAmount = lineTotal;
+    const taxAmount = Number((taxableAmount * taxRate).toFixed(2));
+    return {
+      description: item.description,
+      quantity,
+      unitPrice,
+      discount,
+      taxCode: item.taxCode,
+      taxRate: Number((taxRate * 100).toFixed(2)),
+      taxableAmount,
+      taxAmount,
+      lineTotal
+    };
+  });
+
+  const payments = invoice.payments.map((payment) => ({
+    method: payment.method,
+    amount: Number(payment.amount),
+    paidAt: payment.paidAt.toISOString(),
+    reference: payment.reference
+  }));
+
+  return {
+    supplier: {
+      name: invoice.branch.name,
+      registrationNumber: invoice.branch.code,
+      address: null
+    },
+    buyer: invoice.customer
+      ? {
+          name: invoice.customer.fullName,
+          email: invoice.customer.email,
+          phone: invoice.customer.phone,
+          address: null
+        }
+      : null,
+    invoice: {
+      id: invoice.id,
+      invoiceNo: invoice.invoiceNo,
+      branchCode: invoice.branch.code,
+      currency: invoice.currency,
+      issueDate: invoice.issueDate.toISOString(),
+      dueDate: invoice.dueDate ? invoice.dueDate.toISOString() : null,
+      itemsTotal: Number(invoice.itemsTotal),
+      discountTotal: Number(invoice.discountTotal),
+      taxableSubtotal: Number(invoice.taxableSubtotal),
+      taxAmount: Number(invoice.sst),
+      grandTotal: Number(invoice.grandTotal)
+    },
+    items,
+    payments,
+    summary: {
+      taxableAmount: Number(invoice.taxableSubtotal),
+      taxAmount: Number(invoice.sst),
+      total: Number(invoice.grandTotal)
+    }
+  };
+}
+
+async function scheduleEinvoicePoll(
+  data: { submissionId: string; remoteSubmissionId: string; provider: PrismaEinvoiceProvider; attempt: number }
+) {
+  if (data.attempt >= EINVOICE_MAX_ATTEMPTS) {
+    return;
+  }
+  const delay = calculateEinvoicePollDelay(data.attempt);
+  await queues[QueueNames.EINVOICE_STATUS_POLL].add(
+    data.submissionId,
+    {
+      submissionId: data.submissionId,
+      remoteSubmissionId: data.remoteSubmissionId,
+      provider: data.provider,
+      attempt: data.attempt
+    },
+    {
+      delay,
+      removeOnComplete: 1000,
+      removeOnFail: 1000
+    }
+  );
+}
 
 function logMetrics(name: string, job: Job) {
   logger.info({
@@ -347,6 +498,155 @@ async function handleBackup(job: Job<BackupJob>) {
   return { objectName, bucket: targetBucket };
 }
 
+async function handleEinvoiceSubmit(job: Job<EinvoiceSubmitJob>) {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: job.data.invoiceId },
+    include: { branch: true, customer: true, items: true, payments: true }
+  });
+
+  if (!invoice) {
+    throw new Error(`Invoice not found: ${job.data.invoiceId}`);
+  }
+
+  const provider = job.data.provider ?? DEFAULT_EINVOICE_PROVIDER;
+  const payload = buildEinvoicePayload(invoice as InvoiceWithRelations);
+  const adapter = createEinvoiceProvider(provider, getEinvoiceProviderOptions());
+  const submitResult: EinvoiceSubmitResult = await adapter.submit(payload);
+  const timeoutAt = new Date(Date.now() + EINVOICE_TIMEOUT_HOURS * 60 * 60 * 1000);
+
+  const submission = await prisma.einvoiceSubmission.create({
+    data: {
+      invoiceId: invoice.id,
+      provider,
+      payload,
+      submissionId: submitResult.submissionId,
+      status: submitResult.status,
+      lastError:
+        submitResult.status === EinvoiceSubmissionStatus.REJECTED || submitResult.status === EinvoiceSubmissionStatus.FAILED
+          ? submitResult.message ?? 'Submission rejected by provider.'
+          : null,
+      attempts: 1,
+      timeoutAt
+    }
+  });
+
+  logger.info({
+    event: 'einvoice.submission.created',
+    invoiceId: invoice.id,
+    submissionId: submission.id,
+    provider,
+    status: submission.status
+  });
+
+  if (
+    submitResult.status === EinvoiceSubmissionStatus.PENDING ||
+    submitResult.status === EinvoiceSubmissionStatus.SENT
+  ) {
+    await scheduleEinvoicePoll({
+      submissionId: submission.id,
+      remoteSubmissionId: submitResult.submissionId,
+      provider,
+      attempt: 0
+    });
+  }
+
+  return {
+    submissionId: submission.id,
+    status: submission.status,
+    provider,
+    remoteSubmissionId: submitResult.submissionId
+  };
+}
+
+async function handleEinvoiceStatusPoll(job: Job<EinvoiceStatusPollJob>) {
+  const submission = await prisma.einvoiceSubmission.findUnique({
+    where: { id: job.data.submissionId },
+    include: { invoice: { include: { branch: true } } }
+  });
+
+  if (!submission) {
+    logger.warn({ event: 'einvoice.poll.missing', submissionId: job.data.submissionId });
+    return null;
+  }
+
+  if (
+    submission.status === EinvoiceSubmissionStatus.ACCEPTED ||
+    submission.status === EinvoiceSubmissionStatus.REJECTED ||
+    submission.status === EinvoiceSubmissionStatus.FAILED
+  ) {
+    return { status: submission.status, terminal: true };
+  }
+
+  const now = new Date();
+  if (submission.timeoutAt && submission.timeoutAt.getTime() <= now.getTime()) {
+    const timedOut = await prisma.einvoiceSubmission.update({
+      where: { id: submission.id },
+      data: {
+        status: EinvoiceSubmissionStatus.FAILED,
+        lastError: 'Submission timed out waiting for provider response.',
+        lastPolledAt: now
+      }
+    });
+    return { status: timedOut.status, timedOut: true };
+  }
+
+  const provider = job.data.provider ?? submission.provider ?? DEFAULT_EINVOICE_PROVIDER;
+  const adapter = createEinvoiceProvider(provider, getEinvoiceProviderOptions());
+  const statusResult: EinvoiceStatusResult = await adapter.status(job.data.remoteSubmissionId);
+  const currentAttempt = job.data.attempt ?? 0;
+  const nextAttempt = currentAttempt + 1;
+
+  let statusToPersist = statusResult.status;
+  let lastError: string | null = null;
+
+  if (
+    statusResult.status === EinvoiceSubmissionStatus.REJECTED ||
+    statusResult.status === EinvoiceSubmissionStatus.FAILED
+  ) {
+    lastError = statusResult.message ?? 'Submission rejected by provider.';
+  } else if (
+    statusResult.status === EinvoiceSubmissionStatus.PENDING ||
+    statusResult.status === EinvoiceSubmissionStatus.SENT
+  ) {
+    if (nextAttempt >= EINVOICE_MAX_ATTEMPTS) {
+      statusToPersist = EinvoiceSubmissionStatus.FAILED;
+      lastError = 'Maximum polling attempts reached.';
+    }
+  }
+
+  const updated = await prisma.einvoiceSubmission.update({
+    where: { id: submission.id },
+    data: {
+      status: statusToPersist,
+      lastError,
+      attempts: { increment: 1 },
+      lastPolledAt: now
+    }
+  });
+
+  logger.info({
+    event: 'einvoice.poll.complete',
+    submissionId: submission.id,
+    provider,
+    status: updated.status,
+    attempt: currentAttempt
+  });
+
+  if (
+    statusToPersist === EinvoiceSubmissionStatus.PENDING ||
+    statusToPersist === EinvoiceSubmissionStatus.SENT
+  ) {
+    await scheduleEinvoicePoll({
+      submissionId: submission.id,
+      remoteSubmissionId: job.data.remoteSubmissionId,
+      provider,
+      attempt: nextAttempt
+    });
+  }
+
+  return { status: updated.status, provider };
+}
+
 async function dispatchJob(name: string, job: Job) {
   logMetrics(name, job);
   switch (name) {
@@ -364,6 +664,10 @@ async function dispatchJob(name: string, job: Job) {
       return handlePdfInvoice(job as Job<PdfInvoiceJob>);
     case QueueNames.BACKUP_DAILY:
       return handleBackup(job as Job<BackupJob>);
+    case QueueNames.EINVOICE_SUBMIT:
+      return handleEinvoiceSubmit(job as Job<EinvoiceSubmitJob>);
+    case QueueNames.EINVOICE_STATUS_POLL:
+      return handleEinvoiceStatusPoll(job as Job<EinvoiceStatusPollJob>);
     default:
       logger.warn({ event: 'queue.unhandled', queue: name, job: job.data });
       return null;
