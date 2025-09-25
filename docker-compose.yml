@@ -10,28 +10,32 @@ services:
       api:
         condition: service_healthy
       baileys:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
-      - certbot:/etc/letsencrypt
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     environment:
-      - TZ=Asia/Kuala_Lumpur
+      - TZ=${TZ:-Asia/Kuala_Lumpur}
     healthcheck:
-      test: ["CMD-SHELL", "nginx -t"]
+      test: ['CMD-SHELL', 'nginx -t']
       interval: 30s
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    networks:
+      - public
 
   web:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
     container_name: spec-web
-    env_file: .env
+    env_file:
+      - .env
     environment:
       - PORT=3000
       - NEXT_TELEMETRY_DISABLED=1
@@ -39,20 +43,23 @@ services:
       api:
         condition: service_healthy
     expose:
-      - "3000"
+      - '3000'
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1"]
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:3000/ || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    networks:
+      - public
 
   api:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: spec-api
-    env_file: .env
+    env_file:
+      - .env
     environment:
       - PORT=3001
       - GIT_SHA=${GIT_SHA:-local}
@@ -67,11 +74,11 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     expose:
-      - "3001"
+      - '3001'
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3001/api/health || exit 1"]
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:3001/api/health || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
@@ -82,33 +89,44 @@ services:
       - session_cookie_secret
       - recaptcha_secret
       - minio_secret_key
+    networks:
+      - public
+      - internal
 
   worker:
     build:
       context: ./apps/worker
       dockerfile: Dockerfile
     container_name: spec-worker
-    env_file: .env
+    env_file:
+      - .env
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     environment:
       - MINIO_SECRET_KEY_FILE=/run/secrets/minio_secret_key
     healthcheck:
-      test: ["CMD-SHELL", "node -e 'process.exit(0)'"]
+      test: ['CMD-SHELL', 'node -e "process.exit(0)"']
       interval: 60s
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    secrets:
+      - minio_secret_key
+    networks:
+      - internal
 
   baileys:
     build:
       context: ./apps/baileys
       dockerfile: Dockerfile
     container_name: spec-baileys
-    env_file: .env
+    env_file:
+      - .env
     environment:
       - PORT=${BAILEYS_HTTP_PORT:-4001}
       - WS_PORT=${BAILEYS_WS_PORT:-4002}
@@ -118,89 +136,107 @@ services:
       redis:
         condition: service_healthy
     expose:
-      - "4001"
-      - "4002"
+      - '4001'
+      - '4002'
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:4001/metrics || exit 1"]
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:4001/metrics || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
     restart: unless-stopped
     secrets:
       - minio_secret_key
+    networks:
+      - public
+      - internal
 
   postgres:
     image: postgres:16
     container_name: spec-postgres
-    env_file: .env
+    env_file:
+      - .env
     environment:
       - POSTGRES_USER
       - POSTGRES_PASSWORD
       - POSTGRES_DB
-      - TZ=Asia/Kuala_Lumpur
+      - TZ=${TZ:-Asia/Kuala_Lumpur}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER']
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   redis:
     image: redis:7-alpine
     container_name: spec-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   minio:
     image: minio/minio:RELEASE.2024-02-24T17-11-14Z
     container_name: spec-minio
-    env_file: .env
-    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    command: server /data --console-address ':9001'
     volumes:
       - minio-data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live || exit 1"]
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:9000/minio/health/live || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   certbot-once:
     image: certbot/certbot:latest
     container_name: spec-certbot-once
-    profiles: ["certbot"]
+    profiles: ['certbot']
     volumes:
-      - certbot:/etc/letsencrypt
-    command: certonly --standalone --non-interactive --agree-tos -m admin@${DOMAIN} -d ${DOMAIN}
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: ['sh', '-c']
+    command: >-
+      certonly --webroot --webroot-path /var/www/certbot --non-interactive
+      --agree-tos -m ${CERTBOT_EMAIL} -d ${DOMAIN}
 
   certbot-renew:
     image: certbot/certbot:latest
     container_name: spec-certbot-renew
-    profiles: ["certbot"]
+    profiles: ['certbot']
     volumes:
-      - certbot:/etc/letsencrypt
-    entrypoint: ["/bin/sh", "-c"]
-    command: "while :; do certbot renew --quiet; sleep 12h; done"
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: ['sh', '-c']
+    command: >-
+      while :; do certbot renew --webroot --webroot-path /var/www/certbot --quiet;
+      sleep 12h; done
 
 volumes:
   postgres-data:
   redis-data:
   minio-data:
-  certbot:
+  certbot-etc:
+  certbot-www:
 
 secrets:
+  # Docker secrets are optional. Comment out the secrets below and remove the matching
+  # entries from each service's `secrets:` block to fall back to plain environment variables.
   jwt_secret:
     file: ./deploy/secrets/jwt_secret
   jwt_refresh_secret:
@@ -211,3 +247,10 @@ secrets:
     file: ./deploy/secrets/recaptcha_secret
   minio_secret_key:
     file: ./deploy/secrets/minio_secret_key
+
+networks:
+  public:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true

@@ -1,33 +1,18 @@
-PNPM=pnpm
+COMPOSE ?= docker compose
 
-install:
-	$(PNPM) install
+.PHONY: up down logs prisma seed
 
-build:
-	$(PNPM) build
+up:
+	$(COMPOSE) up -d --build
 
-dev:
-	$(PNPM) dev
-
-lint:
-	$(PNPM) lint
-
-test:
-	$(PNPM) test
-
-migrate:
-	$(PNPM) prisma:migrate
-
-seed:
-	$(PNPM) prisma:seed
-
-prisma: migrate seed
-
-docker-up:
-	docker compose up -d --build
-
-docker-down:
-	docker compose down
+down:
+	$(COMPOSE) down
 
 logs:
-	docker compose logs -f
+	$(COMPOSE) logs -f
+
+prisma:
+	$(COMPOSE) exec api npx prisma migrate deploy
+
+seed:
+	$(COMPOSE) exec api npx prisma db seed
