@@ -1,8 +1,20 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
 import { PrismaService } from '../common/prisma.service';
-import { TicketStatus } from '@prisma/client';
+import { RedisCacheService } from '../common/cache/redis-cache.service';
+import { TicketStatus } from '../common/constants/prisma.enums';
 import { DateTime } from 'luxon';
+
+jest.mock('ioredis', () => {
+  const mockInstance = {
+    on: jest.fn(),
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    quit: jest.fn()
+  };
+  const RedisMock = jest.fn(() => mockInstance);
+  return Object.assign(RedisMock, { __esModule: true, default: RedisMock });
+}, { virtual: true });
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -15,14 +27,16 @@ describe('TicketsService', () => {
       findUnique: jest.fn()
     }
   } as unknown as PrismaService;
+  const cache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn()
+  } as unknown as RedisCacheService;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [TicketsService, { provide: PrismaService, useValue: prisma }]
-    }).compile();
-
-    service = module.get<TicketsService>(TicketsService);
+  beforeEach(() => {
+    service = new TicketsService(prisma, cache);
     jest.clearAllMocks();
+    (cache.get as jest.Mock).mockResolvedValue(null);
   });
 
   it('should filter tickets by status when provided', async () => {

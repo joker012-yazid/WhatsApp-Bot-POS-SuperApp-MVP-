@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { WebhookDto } from './dto/webhook.dto';
-import { WaMessageDirection } from '@prisma/client';
+import { WaMessageDirection } from '../common/constants/prisma.enums';
 
 @Injectable()
 export class ChatService {

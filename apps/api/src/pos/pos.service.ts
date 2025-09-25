@@ -5,57 +5,88 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { Prisma, SaleItem } from '@prisma/client';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { CreateSaleDto, SaleItemDto } from './dto/create-sale.dto';
 import { RefundSaleDto } from './dto/refund-sale.dto';
 import { PrintSaleDto } from './dto/print-sale.dto';
 import { DateTime } from 'luxon';
+import { RedisCacheService } from '../common/cache/redis-cache.service';
+import { calculateRefundTotals, calculateSaleTotals, computeLineTotal, RefundLineInput } from './pos.math';
 
-const SST_RATE = 0.06;
 const TIMEZONE = 'Asia/Kuala_Lumpur';
 
-function computeLineTotal(item: SaleItemDto) {
-  const gross = item.unitPriceCents * item.quantity;
-  const discount = item.discountCents ?? 0;
-  if (discount > gross) {
-    throw new BadRequestException('Discount cannot exceed line total');
-  }
-  return gross - discount;
-}
+type SaleItemEntity = {
+  id: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  discountCents: number;
+  totalCents: number;
+};
 
 @Injectable()
 export class PosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: RedisCacheService
+  ) {}
 
-  listProducts(branchId?: string) {
-    return this.prisma.product.findMany({
+  async listProducts(branchId?: string) {
+    const cacheKey = branchId ? `products:branch:${branchId}` : 'products:all';
+    const cached = await this.cache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const products = await this.prisma.product.findMany({
       where: branchId ? { branchId } : {},
       orderBy: { name: 'asc' }
     });
+    await this.cache.set(cacheKey, products, 60);
+    return products;
   }
 
   async createProduct(dto: CreateProductDto) {
-    return this.prisma.product.create({ data: dto });
+    const product = await this.prisma.product.create({ data: dto });
+    await this.invalidateProductCache(product.branchId);
+    return product;
   }
 
-  async updateProduct(id: string, dto: UpdateProductDto) {
-    await this.ensureProduct(id);
+  async updateProduct(id: string, dto: UpdateProductDto, actorId?: string) {
+    const existing = await this.ensureProduct(id);
     if (dto.sku) {
-      const existing = await this.prisma.product.findFirst({
+      const conflict = await this.prisma.product.findFirst({
         where: { sku: dto.sku, NOT: { id } }
       });
-      if (existing) {
+      if (conflict) {
         throw new BadRequestException('SKU already exists');
       }
     }
-    return this.prisma.product.update({ where: { id }, data: dto });
+    const updated = await this.prisma.product.update({ where: { id }, data: dto });
+    await this.invalidateProductCache(updated.branchId);
+
+    if (typeof dto.priceCents === 'number' && existing.priceCents !== updated.priceCents) {
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'PRODUCT_PRICE_UPDATED',
+          details: {
+            productId: updated.id,
+            previousPriceCents: existing.priceCents,
+            newPriceCents: updated.priceCents
+          }
+        }
+      });
+    }
+
+    return updated;
   }
 
   async deleteProduct(id: string) {
-    await this.ensureProduct(id);
-    return this.prisma.product.delete({ where: { id } });
+    const product = await this.ensureProduct(id);
+    const deleted = await this.prisma.product.delete({ where: { id } });
+    await this.invalidateProductCache(product.branchId);
+    return deleted;
   }
 
   private async ensureProduct(id: string) {
@@ -73,18 +104,6 @@ export class PosService {
       process.env.CORS_ORIGIN ||
       `https://${process.env.DOMAIN ?? 'whatsappbot.laptoppro.my'}`;
     return `${base?.replace(/\/$/, '')}/receipts/${saleId}`;
-  }
-
-  private calculateTotals(items: SaleItemDto[]) {
-    const subtotalCents = items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
-    const discountCents = items.reduce((sum, item) => sum + (item.discountCents ?? 0), 0);
-    if (discountCents > subtotalCents) {
-      throw new BadRequestException('Discount exceeds subtotal');
-    }
-    const netCents = subtotalCents - discountCents;
-    const taxCents = Math.round(netCents * SST_RATE + Number.EPSILON);
-    const totalCents = netCents + taxCents;
-    return { subtotalCents, discountCents, taxCents, totalCents };
   }
 
   async printSale(saleId: string, dto: PrintSaleDto) {
@@ -165,7 +184,7 @@ export class PosService {
     return response.json();
   }
 
-  private async generateReceiptNo(tx: Prisma.TransactionClient, branchId: string) {
+  private async generateReceiptNo(tx: PrismaService, branchId: string) {
     const branch = await tx.branch.findUnique({ where: { id: branchId } });
     if (!branch) {
       throw new NotFoundException('Branch not found');
@@ -189,9 +208,9 @@ export class PosService {
 
   async createSale(dto: CreateSaleDto, actorId?: string) {
     dto.items.forEach((item) => computeLineTotal(item));
-    const totals = this.calculateTotals(dto.items);
+    const totals = calculateSaleTotals(dto.items);
 
-    return this.prisma.$transaction(async (tx) => {
+    const sale = await this.prisma.$transaction(async (tx) => {
       const receiptNo = await this.generateReceiptNo(tx, dto.branchId);
       const sale = await tx.sale.create({
         data: {
@@ -237,10 +256,13 @@ export class PosService {
 
       return sale;
     });
+
+    await this.invalidateProductCache(dto.branchId);
+    return sale;
   }
 
   async refundSale(dto: RefundSaleDto, actorId?: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const refund = await this.prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
         where: { id: dto.saleId },
         include: { items: true }
@@ -261,17 +283,13 @@ export class PosService {
         totalCents: -item.totalCents
       }));
 
-      const subtotalCents = itemsToRefund.reduce(
-        (sum, item) => sum + item.unitPrice * item.quantity,
-        0
+      const refundTotals = calculateRefundTotals(
+        itemsToRefund.map<RefundLineInput>((item) => ({
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          discountCents: item.discountCents
+        }))
       );
-      const discountCents = itemsToRefund.reduce(
-        (sum, item) => sum + item.discountCents,
-        0
-      );
-      const netCents = subtotalCents - discountCents;
-      const taxCents = Math.round(netCents * SST_RATE + Number.EPSILON);
-      const totalCents = netCents + taxCents;
 
       const receiptNo = `${sale.receiptNo}-R`;
       const refund = await tx.sale.create({
@@ -280,10 +298,10 @@ export class PosService {
           customerId: sale.customerId,
           paymentMethod: sale.paymentMethod,
           receiptNo,
-          subtotalCents: -subtotalCents,
-          discountCents: -discountCents,
-          taxCents: -taxCents,
-          totalCents: -totalCents,
+          subtotalCents: -refundTotals.subtotalCents,
+          discountCents: -refundTotals.discountCents,
+          taxCents: -refundTotals.taxCents,
+          totalCents: -refundTotals.totalCents,
           items: {
             create: refundItems
           }
@@ -305,20 +323,32 @@ export class PosService {
           details: {
             refundSaleId: refund.id,
             reason: dto.reason,
-            refundedItems: itemsToRefund.map((item) => item.id)
+            refundedItems: itemsToRefund.map((item) => item.id),
+            refundType: dto.saleItemId ? 'LINE_ITEM' : 'FULL'
           }
         }
       });
 
       return refund;
     });
+
+    const branchId = refund.branchId;
+    if (branchId) {
+      await this.invalidateProductCache(branchId);
+    }
+
+    return refund;
   }
 
-  private findItemOrThrow(items: SaleItem[], id: string) {
+  private findItemOrThrow(items: SaleItemEntity[], id: string) {
     const item = items.find((i) => i.id === id);
     if (!item) {
       throw new NotFoundException('Sale item not found');
     }
     return item;
+  }
+
+  private async invalidateProductCache(branchId: string) {
+    await this.cache.del('products:all', `products:branch:${branchId}`);
   }
 }

@@ -101,6 +101,7 @@ model Product {
   saleItems  SaleItem[]
 
   @@unique([branchId, sku])
+  @@index([branchId, name])
   @@map("products")
 }
 
@@ -159,6 +160,7 @@ model Ticket {
   auditLogs     AuditLog[]        @relation("TicketAudit")
 
   @@index([customerId, status])
+  @@index([status, createdAt(sort: Desc)])
   @@map("tickets")
 }
 

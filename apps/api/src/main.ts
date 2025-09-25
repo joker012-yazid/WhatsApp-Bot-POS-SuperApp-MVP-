@@ -1,4 +1,4 @@
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -6,6 +6,8 @@ import pinoHttp from 'pino-http';
 import { json } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 import { readSecret } from './common/secret.util';
+import { sanitizeForLogging } from './common/logging/sanitize.util';
+import { ApiExceptionFilter } from './common/filters/api-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -24,8 +26,29 @@ async function bootstrap() {
   const cookieSecret = readSecret('SESSION_COOKIE_SECRET', { fallback: 'change-me-too' }) ?? 'change-me-too';
   app.use(cookieParser(cookieSecret));
   app.use(json({ limit: '10mb' }));
+  app.use((req: any, _res, next) => {
+    req.sanitizedLogPayload = sanitizeForLogging({ body: req.body, query: req.query, params: req.params });
+    next();
+  });
   app.use(
     pinoHttp({
+      serializers: {
+        req(req) {
+          const payload = req.sanitizedLogPayload ?? sanitizeForLogging({ body: req.body, query: req.query, params: req.params });
+          return {
+            method: req.method,
+            url: req.url,
+            query: payload.query,
+            params: payload.params,
+            body: payload.body
+          };
+        },
+        res(res) {
+          return {
+            statusCode: res.statusCode
+          };
+        }
+      },
       transport:
         process.env.NODE_ENV !== 'production'
           ? { target: 'pino-pretty', options: { translateTime: true } }
@@ -43,7 +66,11 @@ async function bootstrap() {
         'res.body.user.email',
         'res.body.user.phone'
       ],
-      customProps: (req) => ({ service: 'api', requestId: req.headers['x-request-id'] })
+      customProps: (req) => ({
+        service: 'api',
+        requestId: req.headers['x-request-id'],
+        sanitized: req.sanitizedLogPayload
+      })
     })
   );
 
@@ -54,6 +81,9 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true }
     })
   );
+
+  const httpAdapter = app.get(HttpAdapterHost);
+  app.useGlobalFilters(new ApiExceptionFilter(httpAdapter));
 
   app.setGlobalPrefix('api');
 

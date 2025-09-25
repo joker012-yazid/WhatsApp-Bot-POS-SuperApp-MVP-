@@ -1,14 +1,19 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { TicketStatus, Ticket } from '@prisma/client';
+import { TicketStatus } from '../common/constants/prisma.enums';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TransitionTicketDto } from './dto/transition-ticket.dto';
 import { DateTime } from 'luxon';
+import { RedisCacheService } from '../common/cache/redis-cache.service';
+
+type TicketEntity = {
+  id: string;
+  status: TicketStatus;
+  priority: number | null;
+  createdAt: Date;
+  [key: string]: any;
+};
 
 const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   [TicketStatus.OPEN]: [TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED],
@@ -19,9 +24,12 @@ const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
 
 @Injectable()
 export class TicketsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: RedisCacheService
+  ) {}
 
-  private withSla<T extends Ticket>(ticket: T) {
+  private withSla<T extends TicketEntity>(ticket: T) {
     const priority = ticket.priority ?? 3;
     const hours = priority <= 1 ? 4 : priority === 2 ? 8 : priority === 3 ? 24 : 48;
     const created = DateTime.fromJSDate(ticket.createdAt, { zone: 'Asia/Kuala_Lumpur' });
@@ -33,10 +41,10 @@ export class TicketsService {
   }
 
   async get(id: string) {
-    const ticket = await this.prisma.ticket.findUnique({
+    const ticket = (await this.prisma.ticket.findUnique({
       where: { id },
       include: { customer: true, assignee: true }
-    });
+    })) as TicketEntity | null;
     if (!ticket) {
       throw new NotFoundException('Ticket not found');
     }
@@ -44,12 +52,26 @@ export class TicketsService {
   }
 
   async listTickets(status?: TicketStatus) {
-    const tickets = await this.prisma.ticket.findMany({
+    const cacheKey = status === TicketStatus.OPEN ? 'tickets:status:OPEN' : undefined;
+    if (cacheKey) {
+      const cached = await this.cache.get<any[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    const tickets = (await this.prisma.ticket.findMany({
       where: status ? { status } : {},
       include: { customer: true, assignee: true },
       orderBy: { createdAt: 'desc' }
-    });
-    return tickets.map((ticket) => this.withSla(ticket));
+    })) as TicketEntity[];
+    const withSla = tickets.map((ticket) => this.withSla(ticket));
+
+    if (cacheKey) {
+      await this.cache.set(cacheKey, withSla, 60);
+    }
+
+    return withSla;
   }
 
   async stats() {
@@ -73,7 +95,9 @@ export class TicketsService {
         status: dto.status ?? TicketStatus.OPEN
       }
     });
-    return this.get(ticket.id);
+    const result = await this.get(ticket.id);
+    await this.cache.del('tickets:status:OPEN');
+    return result;
   }
 
   async update(id: string, dto: UpdateTicketDto) {
@@ -88,11 +112,13 @@ export class TicketsService {
         status: dto.status
       }
     });
-    return this.withSla(ticket);
+    const result = this.withSla(ticket);
+    await this.cache.del('tickets:status:OPEN');
+    return result;
   }
 
   async transition(id: string, dto: TransitionTicketDto) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
+    const ticket = (await this.prisma.ticket.findUnique({ where: { id } })) as TicketEntity | null;
     if (!ticket) {
       throw new NotFoundException('Ticket not found');
     }
@@ -104,6 +130,8 @@ export class TicketsService {
       where: { id },
       data: { status: dto.status }
     });
-    return this.withSla(updated);
+    const result = this.withSla(updated);
+    await this.cache.del('tickets:status:OPEN');
+    return result;
   }
 }
